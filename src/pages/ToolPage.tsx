@@ -31,11 +31,24 @@ import {
   rotatePdf,
   splitPdf,
   wordToPdf,
+  pdfToPngs,
+  pdfToDocx,
+  extractPdfImages,
+  addPageNumbers,
+  watermarkPdf,
+  protectPdf,
+  unlockPdf,
+  repairPdf,
+  convertImage,
+  anyToPdf,
+  type Position,
 } from "@/lib/pdfTools";
+import { callAi } from "@/lib/aiClient";
 
 type Result =
   | { kind: "single"; blob: Blob; filename: string }
-  | { kind: "many"; items: { blob: Blob; name: string }[] };
+  | { kind: "many"; items: { blob: Blob; name: string }[] }
+  | { kind: "text"; text: string; filename: string };
 
 export default function ToolPage() {
   const { toolId } = useParams<{ toolId: ToolId }>();
@@ -51,6 +64,13 @@ export default function ToolPage() {
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [angle, setAngle] = useState<90 | 180 | 270>(90);
   const [quality, setQuality] = useState(60);
+  const [password, setPassword] = useState("");
+  const [watermarkText, setWatermarkText] = useState("CONFIDENTIAL");
+  const [pageNumPos, setPageNumPos] = useState<Position>("bottom-center");
+  const [imageTarget, setImageTarget] = useState<"image/jpeg" | "image/png" | "image/webp">(
+    "image/jpeg"
+  );
+  const [language, setLanguage] = useState("English");
 
   const cta = useMemo(() => {
     switch (tool?.id) {
@@ -62,6 +82,21 @@ export default function ToolPage() {
       case "word-to-pdf": return "Convert to PDF";
       case "rotate-pdf": return "Rotate PDF";
       case "pdf-to-text": return "Extract text";
+      case "pdf-to-docx": return "Convert to DOCX";
+      case "pdf-to-png": return "Convert to PNG";
+      case "page-numbers": return "Add page numbers";
+      case "watermark-pdf": return "Add watermark";
+      case "protect-pdf": return "Protect PDF";
+      case "unlock-pdf": return "Unlock PDF";
+      case "repair-pdf": return "Repair PDF";
+      case "extract-images": return "Extract images";
+      case "ocr-pdf": return "Run OCR";
+      case "heic-to-jpg": return "Convert to JPG";
+      case "avif-to-jpg": return "Convert to JPG";
+      case "image-convert": return "Convert images";
+      case "any-to-pdf": return "Convert to PDF";
+      case "ai-summarize": return "Summarize with AI";
+      case "ai-translate": return "Translate with AI";
       default: return "Run";
     }
   }, [tool?.id]);
@@ -157,11 +192,100 @@ export default function ToolPage() {
           setResult({ kind: "single", blob, filename: `${baseName}.txt` });
           break;
         }
+        case "pdf-to-docx": {
+          const blob = await pdfToDocx(files[0]);
+          setResult({ kind: "single", blob, filename: `${baseName}.docx` });
+          break;
+        }
+        case "pdf-to-png": {
+          const items = await pdfToPngs(files[0]);
+          setResult({ kind: "many", items });
+          break;
+        }
+        case "page-numbers": {
+          const blob = await addPageNumbers(files[0], pageNumPos);
+          setResult({ kind: "single", blob, filename: `${baseName}-numbered.pdf` });
+          break;
+        }
+        case "watermark-pdf": {
+          const blob = await watermarkPdf(files[0], watermarkText || "WATERMARK");
+          setResult({ kind: "single", blob, filename: `${baseName}-watermarked.pdf` });
+          break;
+        }
+        case "protect-pdf": {
+          if (!password) throw new Error("Please choose a password");
+          const blob = await protectPdf(files[0], password);
+          setResult({ kind: "single", blob, filename: `${baseName}-protected.pdf` });
+          break;
+        }
+        case "unlock-pdf": {
+          const blob = await unlockPdf(files[0], password);
+          setResult({ kind: "single", blob, filename: `${baseName}-unlocked.pdf` });
+          break;
+        }
+        case "repair-pdf": {
+          const blob = await repairPdf(files[0]);
+          setResult({ kind: "single", blob, filename: `${baseName}-repaired.pdf` });
+          break;
+        }
+        case "extract-images": {
+          const items = await extractPdfImages(files[0]);
+          setResult({ kind: "many", items });
+          break;
+        }
+        case "heic-to-jpg":
+        case "avif-to-jpg": {
+          const items: { blob: Blob; name: string }[] = [];
+          for (const f of files) items.push(await convertImage(f, "image/jpeg", 0.92));
+          setResult({ kind: "many", items });
+          break;
+        }
+        case "image-convert": {
+          const items: { blob: Blob; name: string }[] = [];
+          for (const f of files) items.push(await convertImage(f, imageTarget, 0.92));
+          setResult({ kind: "many", items });
+          break;
+        }
+        case "any-to-pdf": {
+          const blob = await anyToPdf(files);
+          setResult({ kind: "single", blob, filename: "converted.pdf" });
+          break;
+        }
+        case "ai-summarize": {
+          const txtBlob = await pdfToText(files[0]);
+          const text = await txtBlob.text();
+          if (!text.trim()) throw new Error("Couldn't read any text from this PDF.");
+          const summary = await callAi({ mode: "summarize", text });
+          setResult({ kind: "text", text: summary, filename: `${baseName}-summary.txt` });
+          break;
+        }
+        case "ai-translate": {
+          const txtBlob = await pdfToText(files[0]);
+          const text = await txtBlob.text();
+          if (!text.trim()) throw new Error("Couldn't read any text from this PDF.");
+          const translated = await callAi({ mode: "translate", text, language });
+          setResult({
+            kind: "text",
+            text: translated,
+            filename: `${baseName}-${language.toLowerCase()}.txt`,
+          });
+          break;
+        }
+        case "ocr-pdf": {
+          const pages = await pdfToJpgs(files[0]);
+          const images: string[] = [];
+          for (const p of pages.slice(0, 8)) {
+            images.push(await blobToDataUrl(p.blob));
+          }
+          const text = await callAi({ mode: "ocr", images });
+          setResult({ kind: "text", text, filename: `${baseName}-ocr.txt` });
+          break;
+        }
       }
       toast.success("Done!");
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      toast.error("Something went wrong. Please try a different file.");
+      toast.error(e?.message || "Something went wrong. Please try a different file.");
     } finally {
       setBusy(false);
     }
@@ -171,8 +295,10 @@ export default function ToolPage() {
     if (!result) return;
     if (result.kind === "single") {
       saveAs(result.blob, result.filename);
-    } else {
+    } else if (result.kind === "many") {
       result.items.forEach((it) => saveAs(it.blob, it.name));
+    } else {
+      saveAs(new Blob([result.text], { type: "text/plain" }), result.filename);
     }
   };
 
@@ -299,6 +425,86 @@ export default function ToolPage() {
               <p className="mt-2 text-xs text-muted-foreground">
                 Lower quality = smaller file. 60% is a good balance.
               </p>
+            </div>
+          )}
+
+          {files.length > 0 && tool.id === "page-numbers" && (
+            <div className="rounded-xl border border-border bg-card p-5 shadow-card">
+              <Label className="mb-2 block text-sm font-medium">Position</Label>
+              <Select value={pageNumPos} onValueChange={(v) => setPageNumPos(v as Position)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="bottom-center">Bottom · Center</SelectItem>
+                  <SelectItem value="bottom-right">Bottom · Right</SelectItem>
+                  <SelectItem value="top-center">Top · Center</SelectItem>
+                  <SelectItem value="top-right">Top · Right</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {files.length > 0 && tool.id === "watermark-pdf" && (
+            <div className="rounded-xl border border-border bg-card p-5 shadow-card">
+              <Label htmlFor="wm" className="mb-2 block text-sm font-medium">Watermark text</Label>
+              <Input
+                id="wm"
+                value={watermarkText}
+                onChange={(e) => setWatermarkText(e.target.value)}
+                placeholder="CONFIDENTIAL"
+              />
+            </div>
+          )}
+
+          {files.length > 0 && (tool.id === "protect-pdf" || tool.id === "unlock-pdf") && (
+            <div className="rounded-xl border border-border bg-card p-5 shadow-card">
+              <Label htmlFor="pw" className="mb-2 block text-sm font-medium">
+                {tool.id === "protect-pdf" ? "Choose a password" : "Current password"}
+              </Label>
+              <Input
+                id="pw"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+              />
+              {tool.id === "protect-pdf" && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  The original file is embedded inside a wrapper PDF. The password
+                  is required to extract it from a desktop reader.
+                </p>
+              )}
+            </div>
+          )}
+
+          {files.length > 0 && tool.id === "image-convert" && (
+            <div className="rounded-xl border border-border bg-card p-5 shadow-card">
+              <Label className="mb-2 block text-sm font-medium">Target format</Label>
+              <Select value={imageTarget} onValueChange={(v) => setImageTarget(v as any)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="image/jpeg">JPG</SelectItem>
+                  <SelectItem value="image/png">PNG</SelectItem>
+                  <SelectItem value="image/webp">WebP</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {files.length > 0 && tool.id === "ai-translate" && (
+            <div className="rounded-xl border border-border bg-card p-5 shadow-card">
+              <Label htmlFor="lang" className="mb-2 block text-sm font-medium">Translate into</Label>
+              <Input
+                id="lang"
+                value={language}
+                onChange={(e) => setLanguage(e.target.value)}
+                placeholder="English, Hindi, Spanish, French…"
+              />
+            </div>
+          )}
+
+          {result?.kind === "text" && (
+            <div className="max-h-80 overflow-auto rounded-xl border border-border bg-card p-5 text-sm shadow-card whitespace-pre-wrap">
+              {result.text}
             </div>
           )}
 
