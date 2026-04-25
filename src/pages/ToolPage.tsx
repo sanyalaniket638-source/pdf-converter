@@ -41,8 +41,6 @@ export default function ToolPage() {
   const { toolId } = useParams<{ toolId: ToolId }>();
   const tool = toolId ? TOOLS_BY_ID[toolId as ToolId] : undefined;
 
-  if (!tool) return <Navigate to="/" replace />;
-
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
@@ -53,6 +51,22 @@ export default function ToolPage() {
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [angle, setAngle] = useState<90 | 180 | 270>(90);
   const [quality, setQuality] = useState(60);
+
+  const cta = useMemo(() => {
+    switch (tool?.id) {
+      case "merge-pdf": return "Merge PDF";
+      case "split-pdf": return "Split PDF";
+      case "compress-pdf": return "Compress PDF";
+      case "pdf-to-jpg": return "Convert to JPG";
+      case "jpg-to-pdf": return "Convert to PDF";
+      case "word-to-pdf": return "Convert to PDF";
+      case "rotate-pdf": return "Rotate PDF";
+      case "pdf-to-text": return "Extract text";
+      default: return "Run";
+    }
+  }, [tool?.id]);
+
+  if (!tool) return <Navigate to="/" replace />;
 
   const onFiles = async (incoming: File[]) => {
     const next = tool.multiple ? [...files, ...incoming] : incoming.slice(0, 1);
@@ -83,27 +97,6 @@ export default function ToolPage() {
 
   const minNeeded = tool.id === "merge-pdf" ? 2 : 1;
   const canRun = files.length >= minNeeded && !busy;
-
-  const cta = useMemo(() => {
-    switch (tool.id) {
-      case "merge-pdf":
-        return "Merge PDF";
-      case "split-pdf":
-        return "Split PDF";
-      case "compress-pdf":
-        return "Compress PDF";
-      case "pdf-to-jpg":
-        return "Convert to JPG";
-      case "jpg-to-pdf":
-        return "Convert to PDF";
-      case "word-to-pdf":
-        return "Convert to PDF";
-      case "rotate-pdf":
-        return "Rotate PDF";
-      case "pdf-to-text":
-        return "Extract text";
-    }
-  }, [tool.id]);
 
   const run = async () => {
     setBusy(true);
